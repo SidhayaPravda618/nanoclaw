@@ -476,18 +476,31 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
-  // Resolve thread_id per-destination from the most recent inbound message
-  // that came from this same channel+platform. In agent-shared sessions,
-  // different destinations have different thread contexts — using a single
-  // routing.threadId would stamp one channel's thread onto another.
-  const destRouting = resolveDestinationThread(channelType, platformId);
+
+  let threadId: string | null;
+  let inReplyTo: string | null;
+
+  if (dest.threadIdOverride !== undefined && dest.threadIdOverride !== null) {
+    // Fixed thread: empty string = post to channel directly (no thread).
+    threadId = dest.threadIdOverride || null;
+    inReplyTo = routing.inReplyTo;
+  } else {
+    // Resolve thread_id per-destination from the most recent inbound message
+    // that came from this same channel+platform. In agent-shared sessions,
+    // different destinations have different thread contexts — using a single
+    // routing.threadId would stamp one channel's thread onto another.
+    const destRouting = resolveDestinationThread(channelType, platformId);
+    threadId = destRouting?.threadId ?? null;
+    inReplyTo = destRouting?.inReplyTo ?? routing.inReplyTo;
+  }
+
   writeMessageOut({
     id: generateId(),
-    in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
+    in_reply_to: inReplyTo,
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
-    thread_id: destRouting?.threadId ?? null,
+    thread_id: threadId,
     content: JSON.stringify({ text: body }),
   });
 }

@@ -490,7 +490,7 @@ async function buildContainerArgs(
   // of whether an Anthropic vault secret exists. When using Pro OAuth
   // (CLAUDE_CODE_OAUTH_TOKEN already in args), strip the injected key so the
   // SDK doesn't prefer it over the OAuth token.
-  const hasOauthToken = args.some(a => a.startsWith('CLAUDE_CODE_OAUTH_TOKEN='));
+  const hasOauthToken = args.some((a) => a.startsWith('CLAUDE_CODE_OAUTH_TOKEN='));
   if (hasOauthToken) {
     for (let i = args.length - 2; i >= 0; i--) {
       if (args[i] === '-e' && args[i + 1].startsWith('ANTHROPIC_API_KEY=')) {
