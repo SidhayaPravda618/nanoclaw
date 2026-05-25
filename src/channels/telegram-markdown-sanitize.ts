@@ -1,11 +1,27 @@
 /**
- * Sanitize outbound text for Telegram's legacy `Markdown` parse mode.
+ * Sanitize outbound text before the Telegram adapter converts it to MarkdownV2.
  *
- * WORKAROUND: The @chat-adapter/telegram adapter hardcodes parse_mode=Markdown
- * (legacy) but its converter emits CommonMark. Messages with `**bold**`, odd
- * delimiter counts, or malformed links are rejected by Telegram and dropped
- * after retries. Remove this once upstream ships real mode-aware conversion
- * (vercel/chat PR #367 adds the knob; a follow-up is needed for the converter).
+ * The @chat-adapter/telegram adapter (≥4.x) uses parse_mode=MarkdownV2 and
+ * runs a full CommonMark → MarkdownV2 conversion internally. This sanitizer
+ * handles only things the adapter cannot fix on its own:
+ *
+ * - List bullets: `- item` is valid CommonMark list syntax and the adapter
+ *   renders it as `\- item` (escaped dash). Replacing with `•` keeps the
+ *   visual appearance intact while treating the line as prose.
+ * - Horizontal rules: bare `---` / `***` / `___` lines have no MarkdownV2
+ *   equivalent and create ambiguous delimiter runs in the adapter's parser.
+ * - Unbalanced links: orphaned `[` or `]` confuse the CommonMark link parser;
+ *   strip both when counts diverge.
+ * - Code spans/blocks: preserved verbatim via placeholder swap so none of the
+ *   above rules touch their contents.
+ *
+ * Deliberately NOT done here: converting `**bold**` → `*bold*` or stripping
+ * odd delimiter counts. The adapter's CommonMark parser handles `**bold**`
+ * correctly (→ `*bold*` in MarkdownV2). Earlier versions of this function did
+ * those conversions for a legacy-Markdown mode that no longer exists; they
+ * caused a regex to mis-fire on constructs like `**title *italic***` and
+ * produce malformed MarkdownV2 that Telegram rejected with "Can't find end of
+ * Underline entity."
  */
 
 const CODE_PATTERN = /```[\s\S]*?```|`[^`\n]*`/g;
@@ -21,26 +37,12 @@ export function sanitizeTelegramLegacyMarkdown(input: string): string {
     return `${PLACEHOLDER_PREFIX}${codeSegments.length - 1}${PLACEHOLDER_SUFFIX}`;
   });
 
-  // The adapter re-parses and re-stringifies markdown before sending, which
-  // rewrites `- item` list bullets into `* item` — injecting unbalanced
-  // asterisks that Telegram's legacy Markdown parser then rejects. Replace
-  // list bullets with a plain Unicode bullet so the adapter treats the line
-  // as prose.
+  // Replace list bullets with a plain Unicode bullet so the adapter treats
+  // the line as prose rather than a CommonMark list item.
   text = text.replace(/^(\s*)[-+]\s+/gm, '$1• ');
 
-  // Flatten Markdown horizontal rules (bare --- / *** / ___ lines) to a
-  // plain Unicode divider. The parser doesn't understand HR syntax and the
-  // `*` / `_` characters would otherwise unbalance the delimiter counts below.
+  // Flatten Markdown horizontal rules to a plain Unicode divider.
   text = text.replace(/^[ \t]*[-_*]{3,}[ \t]*$/gm, '⎯⎯⎯');
-
-  text = text.replace(/\*\*([^*\n]+?)\*\*/g, '*$1*');
-  text = text.replace(/__([^_\n]+?)__/g, '_$1_');
-
-  const starCount = (text.match(/\*/g) ?? []).length;
-  const underCount = (text.match(/_/g) ?? []).length;
-  if (starCount % 2 !== 0 || underCount % 2 !== 0) {
-    text = text.replace(/[*_]/g, '');
-  }
 
   const openBrackets = (text.match(/\[/g) ?? []).length;
   const closeBrackets = (text.match(/\]/g) ?? []).length;
