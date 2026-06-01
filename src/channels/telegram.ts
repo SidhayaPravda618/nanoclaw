@@ -203,6 +203,18 @@ registerChannelAdapter('telegram', {
     const telegramAdapter = createTelegramAdapter({
       botToken: token,
       mode: 'polling',
+      logger: {
+        child: function(this: unknown, prefix: string) { return this as never; },
+        debug: (msg: string, data?: unknown) => log.debug(msg, data as Record<string, unknown>),
+        info: (msg: string, data?: unknown) => log.info(msg, data as Record<string, unknown>),
+        error: (msg: string, data?: unknown) => log.error(msg, data as Record<string, unknown>),
+        warn: (msg: string, data?: unknown) => {
+          // Single-failure polling resets are expected (idle TCP connection dropped by NAT/firewall).
+          // Only escalate once consecutive failures stack up.
+          if (msg === 'Telegram polling request failed' && (data as any)?.consecutiveFailures === 1) return;
+          log.warn(msg, data as Record<string, unknown>);
+        },
+      },
     });
     const bridge = createChatSdkBridge({
       adapter: telegramAdapter,
